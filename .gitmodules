@@ -1,0 +1,3 @@
+[submodule "lattices"]
+	path = lattices
+	url = https://github.com/igrega348/lattices.git
