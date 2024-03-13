@@ -8,6 +8,7 @@
 ########################################################################
 
 from typing import Tuple, Optional, Union, Dict, Callable, List
+from argparse import Namespace
 
 import numpy as np
 import torch
@@ -180,6 +181,52 @@ class WaveletEmbeddingBlock(torch.nn.Module):
 #################
 # Readout blocks
 #################
+
+class PositiveLayer(torch.nn.Module):
+    @staticmethod
+    def matrix_power_2(C: torch.Tensor) -> torch.Tensor:
+        return torch.linalg.matrix_power(C, 2)
+
+    @staticmethod
+    def matrix_power_4(C: torch.Tensor) -> torch.Tensor:
+        return torch.linalg.matrix_power(C, 4)
+    
+    @staticmethod
+    def matrix_exp(C: torch.Tensor) -> torch.Tensor:
+        return torch.linalg.matrix_exp(C)
+    
+    @staticmethod
+    def matrix_trunc_exp_2(C: torch.Tensor) -> torch.Tensor:
+        return torch.linalg.matrix_power(torch.eye(6, device=C.device)+C/2, 2)
+    
+    @staticmethod
+    def matrix_trunc_exp_4(C: torch.Tensor) -> torch.Tensor:
+        return torch.linalg.matrix_power(torch.eye(6, device=C.device)+C/4, 4)
+    
+    @staticmethod 
+    def identity(C: torch.Tensor) -> torch.Tensor:
+        return C
+
+    def __init__(self, params: Namespace) -> "PositiveLayer":
+        super().__init__()
+        
+        if params.positive_function == 'matrix_power_2':
+            self.func = self.matrix_power_2
+        elif params.positive_function == 'matrix_power_4':
+            self.func = self.matrix_power_4
+        elif params.positive_function == 'matrix_exp':
+            self.func = self.matrix_exp
+        elif params.positive_function == 'matrix_trunc_exp_2':
+            self.func = self.matrix_trunc_exp_2
+        elif params.positive_function == 'matrix_trunc_exp_4':
+            self.func = self.matrix_trunc_exp_4
+        elif params.positive_function == 'none':
+            self.func = self.identity
+        else:
+            raise ValueError(f'Unknown positive function: {params.positive_function}')
+        
+    def forward(self, C: torch.Tensor) -> torch.Tensor:
+        return self.func(C)
 
 class GeneralLinearReadoutBlock(torch.nn.Module):
     def __init__(
