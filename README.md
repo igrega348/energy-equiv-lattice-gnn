@@ -15,7 +15,17 @@ https://arxiv.org/abs/2401.16914
 ├── gnn: ML modules
     ├── ...
 ├── scripts
-    ├── benchmark_models.py: CGC, mCGC and NNConv models for benchmarking
-    ├── run_train.py: train
-    ├── eval_model.py: evaluate model checkpoint
+    ├── benchmark_models: CGC, mCGC and NNConv models for benchmarking
+    ├── train_utils.py: utilities for training
+    ├── train_main.py: training script for the main model - EnergyEquivGNN (Energy-conserving equivariant GNN)
+    ├── train_cgc_vanilla.py: train base CGC model for benchmarking
+    ├── train_cgc_modified.py: train improved CGC model for benchmarking
+    ├── train_nnconv.py: train NNConv based model for benchmarking
 ```
+
+## Usage
+Set up environment using requirement.txt or environment.yml file.
+
+Data is available for download from https://doi.org/10.17863/CAM.106854
+
+Try the scripts in `scripts` folder.
