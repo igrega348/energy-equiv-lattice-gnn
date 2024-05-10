@@ -7,18 +7,110 @@ if str(folder) not in sys.path:
     sys.path.insert(0, str(folder))
 from typing import Any, Tuple, Optional
 from pathlib import Path
+from argparse import Namespace
+import time
 
 import numpy as np
 import pandas as pd
 import torch
 from torch import Tensor
 from torch_geometric.data import Data
+import pytorch_lightning as pl
 from pytorch_lightning.utilities.rank_zero import rank_zero_info
+from pytorch_lightning.utilities.types import STEP_OUTPUT
 from e3nn import o3
 
 from gnn import GLAMM_Dataset
 from lattices.lattices import elasticity_func
 # %%
+class LightningWrappedModel(pl.LightningModule):
+    _time_metrics = {}
+    
+    def __init__(self, model: torch.nn.Module, params: Namespace, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        if isinstance(params, dict):
+            params = Namespace(**params)
+        self.params = params
+        self.model = model(params)
+       
+        self.save_hyperparameters(params)
+
+    def configure_optimizers(self):
+        params = self.params
+        optim = torch.optim.AdamW(params=self.model.parameters(), lr=params.lr, 
+            betas=(params.beta1,0.999), eps=params.epsilon,
+            amsgrad=params.amsgrad, weight_decay=params.weight_decay,)
+        return optim
+
+    def training_step(self, batch, batch_idx):
+        
+        output = self.model(batch)
+
+        true_stiffness = batch['stiffness']
+        pred_stiffness = output['stiffness']
+
+        target = true_stiffness # [N, 6, 6]
+        predicted = pred_stiffness # [N, 6, 6]
+        mean_stiffness = target.pow(2).mean(dim=(1,2)) # [N]
+        stiffness_loss = torch.nn.functional.mse_loss(predicted, target, reduction='none').mean(dim=(1,2)) # [N]
+
+        stiffness_loss_mean = stiffness_loss.mean()
+
+        loss = stiffness_loss
+        loss = 100*(loss / mean_stiffness).mean() # [1]
+    
+        self.log('loss', loss, batch_size=batch.num_graphs, logger=True)
+        self.log('stiffness_loss', stiffness_loss_mean, batch_size=batch.num_graphs, logger=True, prog_bar=True)
+        return loss
+
+    def validation_step(self, batch, batch_idx):
+        directions = torch.randn(250, 3, dtype=torch.float32, device=batch.positions.device)
+        directions = directions / directions.norm(dim=-1, keepdim=True)
+        
+        output = self.model(batch)
+        true_stiffness = batch['stiffness']
+        pred_stiffness = output['stiffness']
+
+        target = true_stiffness
+        predicted = pred_stiffness
+        stiffness_loss = torch.nn.functional.mse_loss(predicted, target)
+        
+        
+        true_stiff_4 = elasticity_func.stiffness_Mandel_to_cart_4(true_stiffness)
+        pred_stiff_4 = elasticity_func.stiffness_Mandel_to_cart_4(pred_stiffness)
+        stiff_dir_true = torch.einsum('...ijkl,pi,pj,pk,pl->...p', true_stiff_4, directions, directions, directions, directions)       
+        stiff_dir_pred = torch.einsum('...ijkl,pi,pj,pk,pl->...p', pred_stiff_4, directions, directions, directions, directions)
+        stiff_dir_loss = torch.nn.functional.l1_loss(stiff_dir_pred, stiff_dir_true)
+       
+        loss = stiffness_loss
+    
+        self.log('val_loss', loss, batch_size=batch.num_graphs, logger=True, prog_bar=True, sync_dist=True)
+        self.log('val_stiff_dir_loss', stiff_dir_loss, batch_size=batch.num_graphs, logger=True, sync_dist=True)
+        return loss
+        
+    def predict_step(self, batch: Any, batch_idx: int = 0, dataloader_idx: int = 0) -> Tuple:
+        """Returns (prediction, true)"""
+        return self.model(batch), batch
+    
+    def on_train_epoch_start(self) -> None:
+        self._time_metrics['_last_step'] = self.trainer.global_step
+        self._time_metrics['_last_time'] = time.time()
+
+    def on_train_batch_end(self, outputs: STEP_OUTPUT, batch: Any, batch_idx: int) -> None:
+        step = self.trainer.global_step
+        steps_done = step - self._time_metrics['_last_step']
+        time_now = time.time()
+        time_taken = time_now - self._time_metrics['_last_time']
+        steps_per_sec = steps_done / time_taken
+        self._time_metrics['_last_step'] = step
+        self._time_metrics['_last_time'] = time_now
+        self.log('steps_per_time', steps_per_sec, prog_bar=False, logger=True)
+        # check if loss is nan
+        loss = outputs['loss']
+        if torch.isnan(loss):
+            self.trainer.should_stop = True
+            rank_zero_info('Loss is NaN. Stopping training')
+
 class RotateLat:
     def __init__(self, rotate=True):
         self.rotate = rotate

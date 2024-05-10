@@ -112,8 +112,8 @@ class GNN_Head(torch.nn.Module):
         return C
 
 
-class PositiveLiteGNN(torch.nn.Module):
-    def __init__(self, params: Namespace, *args: Any, **kwargs: Any) -> "PositiveLiteGNN":
+class EnergyEquivGNN(torch.nn.Module):
+    def __init__(self, params: Namespace, *args: Any, **kwargs: Any) -> "EnergyEquivGNN":
         super().__init__(*args, **kwargs)
 
         self.params = params

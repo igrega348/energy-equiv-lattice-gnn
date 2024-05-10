@@ -6,7 +6,6 @@ if str(folder) not in sys.path:
     sys.path.insert(0, str(folder))
 from argparse import Namespace
 import json
-from pathlib import Path
 
 import pandas as pd
 import pytorch_lightning as pl
@@ -18,52 +17,40 @@ from pytorch_lightning.callbacks import (
 from pytorch_lightning.utilities.rank_zero import rank_zero_info
 from torch_geometric.loader import DataLoader
 
-from gnn import EnergyEquivGNN
-from train_utils import load_datasets, obtain_errors, aggr_errors, LightningWrappedModel
+from benchmark_models.cgc_modified import CrystGraphConv
+from train_utils import LightningWrappedModel, load_datasets, obtain_errors, aggr_errors
 # %%
 def main():
     params = Namespace(
         # network
-        lmax=4,
-        hidden_irreps='32x0e+32x1o+32x2e+32x3o+32x4e',
-        readout_irreps='16x0e+16x1o+16x2e+16x3o+16x4e',
-        num_edge_bases=6,
+        hidden_irreps=128,
         interaction_reduction='sum',
-        interaction_bias=True,
-        agg_norm_const=4.0,
-        inter_MLP_dim=64,
-        inter_MLP_layers=3,
-        correlation=3,
         global_reduction='mean',
-        message_passes=2,
-        positive_function='matrix_power_2',
+        message_passes=3,
+        positive='square',
         # training
-        rotate=False,
-        batch_size=64,
-        valid_batch_size=64,
+        rotate=True,
+        batch_size=256,
+        valid_batch_size=256,
         log_every_n_steps=25,
         optimizer='adamw',
-        lr=0.001, 
         amsgrad=True,
+        lr=0.001, 
         weight_decay=1e-8,
         beta1=0.9,
         epsilon=1e-8,
         num_workers=4,
     )
 
-    run_name = 'mace+ve'
+    run_name = 'cgc+ve'
     log_dir = Path(f'./{run_name}')
     log_dir.mkdir(exist_ok=True)
     rank_zero_info(log_dir)
     params.log_dir = str(log_dir)
 
     ############# setup data ##############
-    train_dset = load_datasets(which='0imp', tag='train', reldens_norm=True)
-    valid_dset = load_datasets(which='0imp', tag='valid', reldens_norm=True)
-
-    max_edge_radius = train_dset.data.edge_attr.max().item()
-    params.max_edge_radius = max_edge_radius
-    # randomize the order of the dataset into loader
+    train_dset = load_datasets(which='0imp', tag='train', reldens_norm=False, rotate=True)
+    valid_dset = load_datasets(which='0imp', tag='valid', reldens_norm=False)
     train_loader = DataLoader(
         dataset=train_dset, 
         batch_size=params.batch_size,
@@ -78,7 +65,7 @@ def main():
     )
 
     ############# setup model ##############
-    lightning_model = LightningWrappedModel(EnergyEquivGNN, params)
+    lightning_model = LightningWrappedModel(CrystGraphConv, params)
 
     ############# setup trainer ##############
     callbacks = [
@@ -88,11 +75,9 @@ def main():
     ]
     trainer = pl.Trainer(
         accelerator='auto',
-        accumulate_grad_batches=4, # effective batch size 256
-        gradient_clip_val=10.0,
         default_root_dir=params.log_dir,
         callbacks=callbacks,
-        max_steps=50000,
+        max_steps=100000,
         max_time='00:04:00:00',
         val_check_interval=100,
         log_every_n_steps=params.log_every_n_steps,
@@ -105,11 +90,11 @@ def main():
         params_path.write_text(json.dumps(vars(params), indent=2))
 
     ############# run training ##############
-    trainer.fit(lightning_model, train_loader, valid_loader)
+    trainer.fit(lightning_model, train_dataloaders=train_loader, val_dataloaders=valid_loader)
 
     ############# run testing ##############
     rank_zero_info('Testing')
-    test_dset = load_datasets(tag='test', reldens_norm=False)
+    test_dset = load_datasets(which='0imp', tag='test', reldens_norm=False)
     test_loader = DataLoader(
         dataset=test_dset, batch_size=params.valid_batch_size, 
         shuffle=False, 
@@ -118,6 +103,6 @@ def main():
     df_errors = obtain_errors(test_results, 'test')
     eval_params = aggr_errors(df_errors)
     pd.Series(eval_params, name=run_name).to_csv(log_dir/f'aggr_results-step={trainer.global_step}.csv')
-
+                      
 if __name__=='__main__':
     main()

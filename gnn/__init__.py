@@ -1,9 +1,9 @@
 from .datasets import GLAMM_Dataset 
-from .model import PositiveLiteGNN
+from .model import EnergyEquivGNN
 
 __all__ = [
     "GLAMM_Dataset",
-    "PositiveLiteGNN",
+    "EnergyEquivGNN",
 ]
 
 classes = __all__
