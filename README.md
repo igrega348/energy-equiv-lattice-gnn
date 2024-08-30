@@ -9,6 +9,9 @@ https://openreview.net/forum?id=smy4DsUbBo
 
 https://arxiv.org/abs/2401.16914
 
+![image](https://github.com/igrega348/energy-equiv-lattice-gnn/assets/40634853/a99726e3-49f2-47e6-a4b2-7bc7826af7d7)
+
+
 ## Code structure
 ```
 ├── lattices: submodule for lattice processing, elasticity and plotting functions
